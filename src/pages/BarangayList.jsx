@@ -20,7 +20,7 @@ export default function BarangayList() {
   const userProfile = storedUser ? JSON.parse(storedUser) : null;
   const userRole = userProfile?.role || "Staff";
   const isStaff = userRole !== "Admin" && userRole !== "Administrator";
-  const [activeBrgy, setActiveBrgy] = useState("Poblacion");
+  const [activeBrgy, setActiveBrgy] = useState("Bonga Mayor");
   const [allRecords, setAllRecords] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
