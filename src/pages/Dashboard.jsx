@@ -78,7 +78,7 @@ const barOpts = {
  *             allLabels: string[], allData: number[],
  *             slope: number, intercept: number }}
  */
-function linearRegression(points, projectYears = 6) {
+function linearRegression(points, projectYears = 5) {
   const empty = {
     historicalLabels: [],
     historicalData: [],
