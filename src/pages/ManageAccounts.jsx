@@ -5,6 +5,7 @@ import Sidebar from "../components/Sidebar";
 import UserProfileBadge from "../components/UserProfileBadge";
 import { supabase } from "../lib/supabase";
 import ResetStaffPasswordModal from "../components/Admin/ResetStaffPasswordModal";
+import PasswordInput from "../components/PasswordInput";
 import "../css/ManageAccounts.css";
 import "../css/AddResident.css";
 
@@ -253,23 +254,27 @@ export default function ManageAccounts() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const verifyAdminPassword = async (pwdToVerify) => {
+  // Re-authenticates the CURRENTLY SIGNED-IN admin against their own account.
+// Deliberately does not fall back to guessing other email addresses (or a
+// shared admin@bustos.gov.ph), otherwise any account's password would satisfy
+// the security check.
+const verifyAdminPassword = async (pwdToVerify) => {
     const pwd = (pwdToVerify !== undefined ? pwdToVerify : adminPasswordConfirm) || "";
     if (!pwd.trim()) {
-      alert("Security Check Failed: Logged-in Admin password is required.");
+      showToast("Security Check Failed: Logged-in Admin password is required.", "error");
       return false;
     }
 
     const trimmedPassword = pwd.trim();
-    const storedUser = JSON.parse(localStorage.getItem("popdev_user")) || {};
-
-    // 1. Direct local stored password check
-    if (storedUser && storedUser.password && storedUser.password === trimmedPassword) {
-      return true;
-    }
 
     try {
-      // 2. Create isolated auth client to prevent session mutation/disruption
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !user.email) {
+        showToast("Security Check Failed: Could not verify your identity. Please log in again.", "error");
+        return false;
+      }
+
+      // Isolated client so verification never mutates the live session.
       const tempAuthClient = createClient(
         import.meta.env.VITE_SUPABASE_URL,
         import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -282,36 +287,20 @@ export default function ManageAccounts() {
         }
       );
 
-      let emailsToTry = [];
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && user.email) emailsToTry.push(user.email);
-      if (storedUser && storedUser.email) emailsToTry.push(storedUser.email);
-      if (storedUser && storedUser.username) {
-        emailsToTry.push(`${storedUser.username}@bustos.gov.ph`);
-      }
-      emailsToTry.push("admin@bustos.gov.ph");
+      const { error: authError } = await tempAuthClient.auth.signInWithPassword({
+        email: user.email,
+        password: trimmedPassword,
+      });
 
-      const uniqueEmails = [...new Set(emailsToTry.filter(Boolean))];
-
-      for (const email of uniqueEmails) {
-        const { error: authError } = await tempAuthClient.auth.signInWithPassword({
-          email: email,
-          password: trimmedPassword,
-        });
-
-        if (!authError) {
-          return true;
-        }
+      if (authError) {
+        showToast("Security Check Failed: Incorrect Admin Password.", "error");
+        return false;
       }
 
-      alert("Security Check Failed: Incorrect Admin Password.");
-      return false;
+      return true;
     } catch (err) {
       console.warn("Auth verification error:", err.message);
-      if (storedUser && storedUser.password && storedUser.password === trimmedPassword) {
-        return true;
-      }
-      alert("Security Check Failed: Incorrect Admin Password.");
+      showToast("Security Check Failed: Incorrect Admin Password.", "error");
       return false;
     }
   };
@@ -1554,8 +1543,7 @@ export default function ManageAccounts() {
               <div className="grid-2-cols" style={{ marginTop: "12px" }}>
                 <div className="field-group">
                   <label>Password *</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     placeholder="••••••••"
                     value={formData.password}
                     onChange={(e) =>
@@ -1571,8 +1559,7 @@ export default function ManageAccounts() {
 
                 <div className="field-group">
                   <label>Confirm Password *</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     placeholder="••••••••"
                     value={formData.confirm_password}
                     onChange={(e) =>
@@ -1611,8 +1598,7 @@ export default function ManageAccounts() {
 
               <div className="field-group" style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid #e2e8f0" }}>
                 <label style={{ color: "var(--primary-dark)", fontWeight: "700" }}>Your Admin Password (Security Verification) *</label>
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="Enter your current logged-in admin password"
                   value={adminPasswordConfirm}
                   onChange={(e) => setAdminPasswordConfirm(e.target.value)}
@@ -1815,8 +1801,7 @@ export default function ManageAccounts() {
 
               <div className="field-group" style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid #e2e8f0" }}>
                 <label style={{ color: "var(--primary-dark)", fontWeight: "700" }}>Your Admin Password (Security Verification) *</label>
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="Enter your current logged-in admin password"
                   value={adminPasswordConfirm}
                   onChange={(e) => setAdminPasswordConfirm(e.target.value)}
@@ -2030,8 +2015,7 @@ export default function ManageAccounts() {
 
               <div className="field-group" style={{ marginBottom: "16px" }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: 'var(--primary-dark)', marginBottom: '6px' }}>Your Admin Password (Security Verification) *</label>
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="Enter your current logged-in admin password"
                   value={adminPasswordConfirm}
                   onChange={(e) => setAdminPasswordConfirm(e.target.value)}
@@ -2200,8 +2184,7 @@ export default function ManageAccounts() {
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: 'var(--primary-dark)', marginBottom: '6px' }}>
                   Your Admin Password (Security Verification) *
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="Enter your current logged-in admin password"
                   value={adminPasswordConfirm}
                   onChange={(e) => setAdminPasswordConfirm(e.target.value)}

@@ -4,6 +4,10 @@ import * as XLSX from 'xlsx';
 import Sidebar from '../components/Sidebar';
 import UserProfileBadge from '../components/UserProfileBadge';
 import { supabase } from '../lib/supabase';
+import {
+  useToast,
+  useConfirm,
+} from '../context/FeedbackContext';
 import '../css/UploadData.css';
 
 const BARANGAYS = [
@@ -97,6 +101,8 @@ function analyzeHeaders(headers) {
 
 export default function UploadData() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const confirm = useConfirm();
   const fileInputRef = useRef(null);
   const logContainerRef = useRef(null);
 
@@ -197,7 +203,9 @@ export default function UploadData() {
   const processSelectedFile = (selectedFile) => {
     const fileExt = selectedFile.name.split('.').pop().toLowerCase();
     if (fileExt !== 'xlsx' && fileExt !== 'xls') {
-      alert('Invalid file format. Please upload an Excel file (.xlsx or .xls).');
+      toast.error(
+        'Invalid file format. Please upload an Excel file (.xlsx or .xls).',
+      );
       return;
     }
 
@@ -308,7 +316,7 @@ export default function UploadData() {
       } catch (error) {
         console.error('Error parsing excel:', error);
         addLog(`Error parsing file: ${error.message}`, 'error');
-        alert(`Failed to parse file: ${error.message}`);
+        toast.error(`Failed to parse file: ${error.message}`);
       } finally {
         setIsParsing(false);
       }
@@ -340,7 +348,9 @@ export default function UploadData() {
     if (parsedSummary.length === 0 || totalRowsToUpload === 0) return;
 
     if (!dataYear) {
-      alert('Please select the year this data belongs to before uploading.');
+      toast.error(
+        'Please select the year this data belongs to before uploading.',
+      );
       return;
     }
 
@@ -349,6 +359,7 @@ export default function UploadData() {
     addLog(`Starting import to Supabase database for data year ${dataYear}...`, 'info');
 
     let totalUploaded = 0;
+    let totalSkipped = 0;
     const CHUNK_SIZE = 200;
 
     try {
@@ -386,34 +397,46 @@ export default function UploadData() {
           teenMother: teenMotherIdx, beneficiary4ps: beneficiary4psIdx
         } = indices;
 
+        const seenInSheet = new Set();
         const residentsBatch = [];
 
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           if (!row) continue;
 
-          const lastVal = lastIdx !== -1 ? row[lastIdx] : null;
-          const firstVal = firstIdx !== -1 ? row[firstIdx] : null;
-          const hhNoVal = hhNoIdx !== -1 ? row[hhNoIdx] : null;
+          const lastVal = cleanString(lastIdx !== -1 ? row[lastIdx] : null);
+          const firstVal = cleanString(firstIdx !== -1 ? row[firstIdx] : null);
+          const hhNoVal = cleanString(hhNoIdx !== -1 ? row[hhNoIdx] : null);
 
-          // Skip if missing name or household no
-          if (!cleanString(lastVal) && !cleanString(firstVal) && !cleanString(hhNoVal)) {
+          // Skip completely empty rows or rows missing both first and last name
+          if (!lastVal && !firstVal) {
             continue;
           }
 
+          const midVal = midIdx !== -1 ? cleanString(row[midIdx]) : null;
+          const dobVal = dobIdx !== -1 ? parseDate(row[dobIdx]) : null;
+
+          // In-memory deduplication: skip duplicate entries within the file itself
+          const dedupKey = `${(lastVal || '').toLowerCase()}__${(firstVal || '').toLowerCase()}__${(midVal || '').toLowerCase()}__${dobVal || ''}`;
+          if (seenInSheet.has(dedupKey)) {
+            totalSkipped++;
+            continue;
+          }
+          seenInSheet.add(dedupKey);
+
           // Build database object matching schema.
           const resident = {
-            h_no: cleanString(hhNoVal) || 'N/A',
+            h_no: hhNoVal || 'N/A',
             house_no: houseNoIdx !== -1 ? cleanString(row[houseNoIdx]) : null,
             purok: purokIdx !== -1 ? cleanString(row[purokIdx]) : null,
             residence_type: resTypeIdx !== -1 ? cleanString(row[resTypeIdx]) : null,
             is_household_head: isHeadIdx !== -1 ? parseBool(row[isHeadIdx]) : false,
             relation_to_head: relIdx !== -1 ? cleanString(row[relIdx]) : null,
-            last_name: cleanString(lastVal) || 'UNKNOWN',
-            first_name: cleanString(firstVal) || 'UNKNOWN',
-            middle_name: midIdx !== -1 ? cleanString(row[midIdx]) : null,
+            last_name: lastVal || 'UNKNOWN',
+            first_name: firstVal || 'UNKNOWN',
+            middle_name: midVal,
             qualifier: qualIdx !== -1 ? cleanString(row[qualIdx]) : null,
-            birth_date: dobIdx !== -1 ? parseDate(row[dobIdx]) : null,
+            birth_date: dobVal,
             birth_place: pobIdx !== -1 ? cleanString(row[pobIdx]) : null,
             age: ageIdx !== -1 ? parseIntOrNull(row[ageIdx]) : null,
             sex: sexIdx !== -1 ? cleanString(row[sexIdx]) : null,
@@ -448,24 +471,47 @@ export default function UploadData() {
 
           const { error } = await supabase.from('residents').insert(chunk);
           if (error) {
-            throw error;
+            // If the chunk failed because of a duplicate resident, fallback to inserting
+            // record-by-record so existing duplicates are skipped and new records are saved!
+            if (error.message && error.message.includes('already exists')) {
+              addLog(`Encountered existing resident(s) in chunk. Skipping duplicates and continuing upload...`, 'warning');
+              let chunkUploaded = 0;
+              for (const resident of chunk) {
+                const { error: singleErr } = await supabase.from('residents').insert([resident]);
+                if (singleErr) {
+                  if (singleErr.message && singleErr.message.includes('already exists')) {
+                    totalSkipped++;
+                  } else {
+                    throw singleErr;
+                  }
+                } else {
+                  chunkUploaded++;
+                }
+              }
+              totalUploaded += chunkUploaded;
+            } else {
+              throw error;
+            }
+          } else {
+            totalUploaded += chunk.length;
           }
 
-          totalUploaded += chunk.length;
           const progress = Math.min(Math.round((totalUploaded / totalRowsToUpload) * 100), 100);
           setUploadProgress(progress);
         }
 
-        addLog(`Successfully uploaded ${residentsBatch.length} records for ${item.barangayName}.`, 'success');
+        addLog(`Finished processing Barangay ${item.barangayName}.`, 'success');
       }
 
-      addLog(`Database upload complete! Total successfully imported records: ${totalUploaded} (data year: ${dataYear}).`, 'success');
+      addLog(`Database upload complete! Total successfully imported records: ${totalUploaded} (data year: ${dataYear}${totalSkipped > 0 ? `, ${totalSkipped} duplicate records skipped` : ''}).`, 'success');
       setUploadComplete(true);
-      alert(`Import Successful! Added ${totalUploaded} residents to Supabase for data year ${dataYear}.`);
+      toast.success(
+        `Import Successful! Added ${totalUploaded} residents to Supabase for data year ${dataYear}.${totalSkipped > 0 ? ` (${totalSkipped} duplicate records were skipped).` : ''}`
+      );
     } catch (err) {
       console.error('Error uploading to Supabase:', err);
       addLog(`CRITICAL ERROR during upload: ${err.message}`, 'error');
-      alert(`Upload failed: ${err.message}`);
+      toast.error(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
     }
@@ -615,10 +661,16 @@ export default function UploadData() {
               <button
                 type="button"
                 className="btn-cancel"
-                onClick={() => {
-                  if (window.confirm('Are you sure you want to go back?')) {
-                    navigate('/barangay');
-                  }
+                onClick={async () => {
+                  const confirmed = await confirm({
+                    title: 'Leave Upload Page',
+                    message: 'Are you sure you want to go back?',
+                    confirmLabel: 'Go Back',
+                    cancelLabel: 'Stay Here',
+                    danger: true,
+                    warning: 'Any parsed but unuploaded data will be discarded.',
+                  });
+                  if (confirmed) navigate('/barangay');
                 }}
                 disabled={isUploading}
               >

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useToast, useConfirm, usePasswordPrompt } from '../context/FeedbackContext';
 import '../css/BarangayList.css';
 import '../css/ArchiveResidents.css';
 
@@ -8,6 +9,9 @@ export default function ArchiveResidents() {
   const [archived, setArchived] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const toast = useToast();
+  const confirm = useConfirm();
+  const promptPassword = usePasswordPrompt();
 
   useEffect(() => {
     fetchArchived();
@@ -53,30 +57,46 @@ export default function ArchiveResidents() {
   };
 
   const handleRestore = async (res) => {
-    if (!window.confirm('Are you sure you want to restore this resident to the active list?')) return;
+    const fullName = `${res.first} ${res.last}`.trim();
 
-    const adminPassword = prompt('SECURITY CHECK: Enter Admin Password to confirm restoration:');
-    if (adminPassword === null) return;
+    const confirmed = await confirm({
+      title: 'Restore Resident',
+      message: `Are you sure you want to restore ${fullName} to the active list?`,
+      confirmLabel: 'Continue',
+    });
+    if (!confirmed) return;
+
+    const verified = await promptPassword({
+      title: 'Security Check',
+      message: `Enter the Admin Password to confirm restoration of ${fullName}.`,
+      label: 'Admin Password',
+      placeholder: 'Enter your Admin Password',
+      confirmLabel: 'Verify & Restore',
+      onVerify: async (password) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || !user.email) {
+          return {
+            ok: false,
+            error: 'Session error. Could not verify your identity. Please log in again.',
+          };
+        }
+
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password,
+        });
+
+        if (authError) {
+          return { ok: false, error: 'Incorrect Admin Password.' };
+        }
+
+        return { ok: true };
+      },
+    });
+    if (!verified) return;
 
     setIsLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !user.email) {
-        setIsLoading(false);
-        alert('Session error. Could not verify your identity. Please log in again.');
-        return;
-      }
-
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: adminPassword,
-      });
-
-      if (authError) {
-        setIsLoading(false);
-        alert('Error: Incorrect Admin Password.');
-        return;
-      }
       const { error } = await supabase
         .from('residents')
         .update({ 
@@ -89,11 +109,11 @@ export default function ArchiveResidents() {
 
       const updatedArchived = archived.filter(r => r.id !== res.id);
       setArchived(updatedArchived);
-      
-      alert('Success! The resident has been restored.');
+
+      toast.success('Success! The resident has been restored.');
     } catch (err) {
       console.error('Error restoring:', err);
-      alert('Failed to restore: ' + err.message);
+      toast.error('Failed to restore: ' + err.message);
     } finally {
       setIsLoading(false);
     }

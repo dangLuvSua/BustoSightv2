@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useToast } from '../context/FeedbackContext';
+import PasswordInput from '../components/PasswordInput';
 import '../css/LoginPage.css';
 
 export default function LoginPage() {
@@ -10,17 +12,16 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const location = useLocation();
-  const [toast, setToast] = useState(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (location.state?.message) {
-      setToast({ message: location.state.message, type: 'error' });
-      setTimeout(() => setToast(null), 3500);
+      toast.error(location.state.message);
 
       // Clear state so it doesn't reappear on refresh
       navigate(location.pathname, { replace: true });
     }
-  }, [location, navigate]);
+  }, [location, navigate, toast]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -84,8 +85,10 @@ export default function LoginPage() {
         return;
       }
 
-      // Store user session info for the frontend
-      localStorage.setItem('popdev_user', JSON.stringify({ ...profile, password: password }));
+      // Store user session info for the frontend.
+      // NOTE: never persist the password here. Admin re-authentication verifies
+      // against Supabase directly (see ManageAccounts.verifyAdminPassword).
+      localStorage.setItem('popdev_user', JSON.stringify({ ...profile }));
       navigate('/dashboard');
     } catch (err) {
       console.error('Login error:', err);
@@ -100,14 +103,6 @@ export default function LoginPage() {
       {/* Shared background layers */}
       <div className="bg-image" />
       <div className="overlay" />
-
-      {/* Toast Notification */}
-      {toast && (
-        <div className={`login-toast login-toast-${toast.type} animate-fade-up`}>
-          <span>{toast.message}</span>
-          <button onClick={() => setToast(null)}>×</button>
-        </div>
-      )}
 
       {/* Back button */}
       <Link to="/" className="back-btn">← Back to Home</Link>
@@ -155,8 +150,7 @@ export default function LoginPage() {
 
               <div className="login-input-group">
                 <label htmlFor="password">Password</label>
-                <input
-                  type="password"
+                <PasswordInput
                   id="password"
                   name="password"
                   placeholder="Enter password"

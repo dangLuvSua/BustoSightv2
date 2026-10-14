@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useConfirm } from '../context/FeedbackContext';
+import { useSession } from '../context/SessionContext';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard' },
@@ -14,6 +16,8 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const confirm = useConfirm();
+  const { performLogout } = useSession();
   const [isOpen, setIsOpen] = useState(false);
 
   const [userProfile, setUserProfile] = useState(() => {
@@ -90,11 +94,17 @@ export default function Sidebar() {
   };
 
   const handleLogout = async () => {
-    if (window.confirm('Are you sure you want to logout?')) {
-      await supabase.auth.signOut();
-      localStorage.removeItem('popdev_user');
-      navigate('/login');
-    }
+    const confirmed = await confirm({
+      title: 'Log Out',
+      message: 'Are you sure you want to logout?',
+      confirmLabel: 'Log Out',
+      cancelLabel: 'Stay Signed In',
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    // Shared teardown so manual and idle logout clear identical state.
+    await performLogout();
   };
 
   const closeSidebar = () => setIsOpen(false);

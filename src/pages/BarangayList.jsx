@@ -4,10 +4,18 @@ import Sidebar from "../components/Sidebar";
 import UserProfileBadge from "../components/UserProfileBadge";
 import { brgyStats } from "../data/brgyData";
 import { supabase } from "../lib/supabase";
+import {
+  useToast,
+  useConfirm,
+  usePasswordPrompt,
+} from "../context/FeedbackContext";
 import "../css/BarangayList.css";
 
 export default function BarangayList() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const promptPassword = usePasswordPrompt();
   const storedUser = localStorage.getItem("popdev_user");
   const userProfile = storedUser ? JSON.parse(storedUser) : null;
   const userRole = userProfile?.role || "Staff";
@@ -150,41 +158,57 @@ export default function BarangayList() {
 
   const handleArchive = async (res) => {
     if (userRole === "Staff") {
-      alert("Access Denied: Staff users are not permitted to archive residents.");
+      toast.error(
+        "Access Denied: Staff users are not permitted to archive residents.",
+      );
       return;
     }
 
-    if (
-      !window.confirm(
-        `Are you sure you want to archive resident ${res.first} ${res.last}?`,
-      )
-    )
-      return;
+    const fullName = `${res.first} ${res.last}`.trim();
 
-    const adminPassword = prompt(
-      "Security Check: Please enter Admin Password to archive this record:",
-    );
-    if (adminPassword === null) return;
+    const confirmed = await confirm({
+      title: "Archive Resident",
+      message: `Are you sure you want to archive resident ${fullName}?`,
+      confirmLabel: "Continue",
+      danger: true,
+      warning:
+        "Archived residents are hidden from the active list. You can restore them later from the Archive page.",
+    });
+    if (!confirmed) return;
+
+    const verified = await promptPassword({
+      title: "Security Check",
+      message: `Enter the Admin Password to archive ${fullName}.`,
+      label: "Admin Password",
+      placeholder: "Enter your Admin Password",
+      confirmLabel: "Verify & Archive",
+      danger: true,
+      onVerify: async (password) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || !user.email) {
+          return {
+            ok: false,
+            error:
+              "Session error. Could not verify your identity. Please log in again.",
+          };
+        }
+
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password,
+        });
+
+        if (authError) {
+          return { ok: false, error: "Access Denied: Incorrect Admin Password." };
+        }
+
+        return { ok: true };
+      },
+    });
+    if (!verified) return;
 
     setIsLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !user.email) {
-        setIsLoading(false);
-        alert("Session error. Could not verify your identity. Please log in again.");
-        return;
-      }
-
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: adminPassword,
-      });
-
-      if (authError) {
-        setIsLoading(false);
-        alert("Access Denied: Incorrect Admin Password.");
-        return;
-      }
       const { error } = await supabase
         .from("residents")
         .update({
@@ -200,47 +224,59 @@ export default function BarangayList() {
       setAllRecords(updatedRecords);
 
       setSelectedHousehold(null);
-      alert("Successfully archived!");
+      toast.success("Successfully archived!");
     } catch (err) {
       console.error("Error archiving:", err);
-      alert("Failed to archive: " + err.message);
+      toast.error("Failed to archive: " + err.message);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDeleteBrgyData = async () => {
-    if (
-      !window.confirm(
-        `WARNING: Are you sure you want to PERMANENTLY DELETE ALL records in Barangay ${activeBrgy}? This action cannot be undone.`,
-      )
-    )
-      return;
+    const confirmed = await confirm({
+      title: "Delete All Records",
+      message: `Are you sure you want to PERMANENTLY DELETE ALL records in Barangay ${activeBrgy}?`,
+      confirmLabel: "Continue",
+      danger: true,
+      warning:
+        "This action cannot be undone. Archived records are not affected.",
+    });
+    if (!confirmed) return;
 
-    const adminPassword = prompt(
-      "Security Check: Please enter Admin Password to delete these records:",
-    );
-    if (adminPassword === null) return;
+    const verified = await promptPassword({
+      title: "Security Check",
+      message: `Enter the Admin Password to permanently delete all records in Barangay ${activeBrgy}.`,
+      label: "Admin Password",
+      placeholder: "Enter your Admin Password",
+      confirmLabel: "Verify & Delete",
+      danger: true,
+      onVerify: async (password) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || !user.email) {
+          return {
+            ok: false,
+            error:
+              "Session error. Could not verify your identity. Please log in again.",
+          };
+        }
+
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password,
+        });
+
+        if (authError) {
+          return { ok: false, error: "Access Denied: Incorrect Admin Password." };
+        }
+
+        return { ok: true };
+      },
+    });
+    if (!verified) return;
 
     setIsLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !user.email) {
-        setIsLoading(false);
-        alert("Session error. Could not verify your identity. Please log in again.");
-        return;
-      }
-
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: adminPassword,
-      });
-
-      if (authError) {
-        setIsLoading(false);
-        alert("Access Denied: Incorrect Admin Password.");
-        return;
-      }
       const { error } = await supabase
         .from("residents")
         .delete()
@@ -248,11 +284,13 @@ export default function BarangayList() {
 
       if (error) throw error;
 
-      fetchResidents();
-      alert(`Successfully deleted all records in Barangay ${activeBrgy}!`);
+      await fetchResidents();
+      toast.success(
+        `Successfully deleted all records in Barangay ${activeBrgy}!`,
+      );
     } catch (err) {
       console.error("Error deleting records:", err);
-      alert("Failed to delete records: " + err.message);
+      toast.error("Failed to delete records: " + err.message);
     } finally {
       setIsLoading(false);
     }
@@ -374,7 +412,7 @@ export default function BarangayList() {
 
     const newRecords = [...allRecords, ...mockResidents];
     setAllRecords(newRecords);
-    alert("Mock data generated successfully!");
+    toast.success("Mock data generated successfully!");
   };
 
   const openHousehold = async (hhNo, dataYear) => {
@@ -497,7 +535,7 @@ export default function BarangayList() {
       });
       const newAllRecords = [...allRecords, ...importedData];
       setAllRecords(newAllRecords);
-      alert("Import Successful!");
+      toast.success("Import Successful!");
     };
     reader.readAsText(file);
   };

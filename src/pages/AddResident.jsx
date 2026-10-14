@@ -4,11 +4,20 @@ import Sidebar from "../components/Sidebar";
 import UserProfileBadge from "../components/UserProfileBadge";
 import { brgyStats } from "../data/brgyData";
 import { supabase } from "../lib/supabase";
+import {
+  useToast,
+  useConfirm,
+} from "../context/FeedbackContext";
 import "../css/AddResident.css";
 import { isValidName, getNameError } from "../lib/nameValidation";
 
+// The household head must legally be an adult.
+const HEAD_MIN_AGE = 18;
+
 export default function AddResident() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [currentStep, setCurrentStep] = useState(1);
   // const [household, setHousehold] = useState({
   //   hh_num: "",
@@ -50,6 +59,10 @@ export default function AddResident() {
   const [expandedMemberIndex, setExpandedMemberIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [formWarning, setFormWarning] = useState("");
+  // Inline, per-field DOB errors. Kept separate from `formWarning` so the
+  // message sits under the input instead of in the banner at the top.
+  const [headDobError, setHeadDobError] = useState("");
+  const [memberDobErrors, setMemberDobErrors] = useState({});
 
   // Reusable default states so we can both initialize and reset the form
   const initialHousehold = {
@@ -108,8 +121,54 @@ export default function AddResident() {
     return age >= 0 ? age : "";
   };
 
+  // `type="date"` parses as UTC midnight, so a bare `getFullYear()` on the
+  // parsed Date can read as "yesterday" in negative-offset timezones. Reading
+  // UTC components keeps the comparison exact.
+  const toUtcDay = (date) =>
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+
+  const startOfTodayUtc = () => {
+    const now = new Date();
+    return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  };
+
+  const isFutureDate = (dobString) =>
+    !!dobString && toUtcDay(new Date(dobString)) > startOfTodayUtc();
+
+  // Stops the native date picker offering today/tomorrow in the first place.
+  const getMaxDob = () => {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  };
+
+  // Shared by the head and the family members so both use identical rules.
+  const getDobError = (dobString) => {
+    if (!dobString) return "";
+    if (isFutureDate(dobString)) {
+      return "Date of Birth cannot be today or a future date.";
+    }
+    const age = calculateAge(dobString);
+    if (age === "" || age < 0) {
+      return "Date of Birth is invalid.";
+    }
+    return "";
+  };
+
+  const getHeadDobError = (dobString) => {
+    const dobError = getDobError(dobString);
+    if (dobError) return dobError;
+
+    const age = calculateAge(dobString);
+    if (age < HEAD_MIN_AGE) {
+      return `The household head must be at least ${HEAD_MIN_AGE} years old.`;
+    }
+    return "";
+  };
+
   const handleHeadDobChange = (dobValue) => {
     const calculatedAge = calculateAge(dobValue);
+    setHeadDobError(getHeadDobError(dobValue));
     setHead((prev) => ({
       ...prev,
       dob: dobValue,
@@ -119,6 +178,7 @@ export default function AddResident() {
 
   const handleMemberDobChange = (index, dobValue) => {
     const calculatedAge = calculateAge(dobValue);
+    setMemberDobErrors((prev) => ({ ...prev, [index]: getDobError(dobValue) }));
     const newMembers = [...members];
     newMembers[index].dob = dobValue;
     newMembers[index].age = calculatedAge;
@@ -148,7 +208,9 @@ export default function AddResident() {
     if (field === "is_senior" && checked) {
       const age = parseInt(head.age, 10);
       if (!age || age < 60) {
-        alert("Senior Citizen classification requires age 60 or above.");
+        toast.error(
+          "Senior Citizen classification requires age 60 or above.",
+        );
         return;
       }
     }
@@ -166,7 +228,9 @@ export default function AddResident() {
     if (field === "is_senior" && checked) {
       const age = parseInt(members[index].age, 10);
       if (!age || age < 60) {
-        alert("Senior Citizen classification requires age 60 or above.");
+        toast.error(
+          "Senior Citizen classification requires age 60 or above.",
+        );
         return;
       }
     }
@@ -213,6 +277,8 @@ export default function AddResident() {
       if (!head.pob)
         return "Place of Birth is required for the Household Head.";
       if (!head.dob) return "Date of Birth is required for the Household Head.";
+      const headDobErr = getHeadDobError(head.dob);
+      if (headDobErr) return headDobErr;
       if (head.age !== "" && head.age <= 18)
         return "Household head must be over 18 years old.";
     }
@@ -245,6 +311,9 @@ export default function AddResident() {
 
           if (!member.rel)
             return `Member ${i + 1} is missing a Relationship to Head.`;
+
+          const memberDobErr = getDobError(member.dob);
+          if (memberDobErr) return `Member ${i + 1}: ${memberDobErr}`;
         }
       }
     }
@@ -315,9 +384,6 @@ export default function AddResident() {
     if (dir === 1) {
       const warning = validateStep();
       if (warning) {
-        if (warning.includes("18 years old")) {
-          alert("Invalid: Household head must be over 18 years old.");
-        }
         setFormWarning(warning);
         return;
       }
@@ -453,7 +519,6 @@ export default function AddResident() {
             : `Cannot save: Resident ${fullName} already exists in ${r.barangay} for year ${r.data_year}.`;
 
           setFormWarning(msg);
-          alert(msg);
           setIsLoading(false);
           return;
         }
@@ -471,7 +536,6 @@ export default function AddResident() {
           const fullName = `${r.first_name} ${r.last_name}`;
           const msg = `Cannot save: Resident ${fullName} already exists in local storage for year ${r.data_year}.`;
           setFormWarning(msg);
-          alert(msg);
           setIsLoading(false);
           return;
         }
@@ -533,14 +597,14 @@ export default function AddResident() {
         JSON.stringify([...allRecords, ...newRecordsLocal]),
       );
 
-      alert("Resident successfully saved to Supabase!");
+      toast.success("Resident successfully saved to Supabase!");
       navigate("/barangay");
     } catch (err) {
       console.error("Error saving to Supabase:", err);
       if (err.message && err.message.includes("already exists")) {
         setFormWarning(err.message);
       }
-      alert("Failed to save to Supabase: " + err.message);
+      toast.error("Failed to save to Supabase: " + err.message);
     } finally {
       setIsLoading(false);
     }
@@ -588,10 +652,14 @@ export default function AddResident() {
       console.error("Failed to auto-generate HH number", err);
     }
   };
-  const resetForm = () => {
-    const confirmed = window.confirm(
-      "Clear all entered fields? This cannot be undone.",
-    );
+  const resetForm = async () => {
+    const confirmed = await confirm({
+      title: "Clear Form",
+      message: "Clear all entered fields? This cannot be undone.",
+      confirmLabel: "Clear Form",
+      cancelLabel: "Keep Editing",
+      danger: true,
+    });
     if (!confirmed) return;
 
     setHousehold(initialHousehold);
@@ -599,6 +667,8 @@ export default function AddResident() {
     setMembers([]);
     setExpandedMemberIndex(-1);
     setFormWarning("");
+    setHeadDobError("");
+    setMemberDobErrors({});
     setCurrentStep(1);
   };
 
@@ -628,16 +698,20 @@ export default function AddResident() {
         </div>
 
         <div className="form-card-container">
-          <div
-            className="form-blue-header"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <h1 style={{ margin: 0, fontSize: "18px", textTransform: "none", letterSpacing: "0.3px" }}>
+          <div className="form-blue-header">
+            <div className="form-blue-header-left">
+              <button
+                type="button"
+                className="btn-header-back"
+                onClick={() => handleStep(-1)}
+                disabled={isLoading}
+                style={{ display: currentStep === 1 ? "none" : undefined }}
+              >
+                <i className="fa-solid fa-arrow-left" aria-hidden="true" />
+                Previous
+              </button>
+
+              <h1>
                 {currentStep === 1
                   ? "Step 1: Household & Location Details"
                   : currentStep === 2
@@ -664,6 +738,7 @@ export default function AddResident() {
                 cursor: "pointer",
                 textShadow: "0 1px 2px rgba(0,0,0,0.2)",
                 transition: "background 0.2s ease",
+                flexShrink: 0,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
@@ -913,9 +988,18 @@ export default function AddResident() {
                       <label>Date of Birth</label>
                       <input
                         type="date"
+                        className={headDobError ? "input-error" : ""}
                         value={head.dob}
+                        max={getMaxDob()}
+                        aria-invalid={headDobError ? "true" : undefined}
+                        aria-describedby={headDobError ? "head-dob-error" : undefined}
                         onChange={(e) => handleHeadDobChange(e.target.value)}
                       />
+                      {headDobError && (
+                        <span className="err-msg" id="head-dob-error">
+                          {headDobError}
+                        </span>
+                      )}
                     </div>
                     <div className="field-group">
                       <label>Age</label>
@@ -1553,11 +1637,29 @@ export default function AddResident() {
                                     <label>Date of Birth</label>
                                     <input
                                       type="date"
+                                      className={memberDobErrors[i] ? "input-error" : ""}
                                       value={m.dob}
+                                      max={getMaxDob()}
+                                      aria-invalid={
+                                        memberDobErrors[i] ? "true" : undefined
+                                      }
+                                      aria-describedby={
+                                        memberDobErrors[i]
+                                          ? `member-dob-error-${i}`
+                                          : undefined
+                                      }
                                       onChange={(e) =>
                                         handleMemberDobChange(i, e.target.value)
                                       }
                                     />
+                                    {memberDobErrors[i] && (
+                                      <span
+                                        className="err-msg"
+                                        id={`member-dob-error-${i}`}
+                                      >
+                                        {memberDobErrors[i]}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="field-group">
                                     <label>Age</label>
@@ -2155,33 +2257,8 @@ export default function AddResident() {
               )}
 
               <div className="form-nav-buttons">
-                {/* <button
-                  type="button"
-                  className="btn-clear-fields"
-                  onClick={resetForm}
-                  disabled={isLoading}
-                  style={{
-                    background: "none",
-                    border: "1px solid #cbd5e1",
-                    color: "#64748b",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    padding: "10px 18px",
-                    borderRadius: "8px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Clear Fields
-                </button> */}
-
-                <button
-                  type="button"
-                  className="btn-back"
-                  onClick={() => handleStep(-1)}
-                  style={{ display: currentStep === 1 ? "none" : undefined }}
-                >
-                  Previous
-                </button>
+                {/* The "Previous" control now lives in the blue form header. */}
+                <span className="form-nav-spacer" />
 
                 <button
                   type="button"

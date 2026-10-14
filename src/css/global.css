@@ -524,6 +524,57 @@ img {
   color: var(--gray-500);
 }
 
+/* ---- PASSWORD FIELD TOGGLE ---- */
+/* Wraps PasswordInput. Padding-right must win over the JSX `style` prop used by
+   several call sites, and an inline style only loses to !important. */
+.pw-field {
+  position: relative;
+  display: flex;
+}
+
+.pw-field input {
+  padding-right: 42px !important;
+}
+
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--gray-400);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.pw-toggle:hover {
+  background: var(--gray-100);
+  color: var(--gray-700);
+}
+
+.pw-toggle:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 1px;
+  color: var(--gray-700);
+}
+
+/* Password is currently revealed */
+.pw-toggle.is-visible {
+  color: var(--accent-hover);
+}
+
+.pw-toggle.is-visible:hover {
+  background: rgba(49, 130, 206, 0.12);
+}
+
 .modern-select {
   appearance: none;
   background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%23718096' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 12px center;

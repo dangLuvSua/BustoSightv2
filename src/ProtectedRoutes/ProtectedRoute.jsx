@@ -1,65 +1,68 @@
 import { Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { useSession } from "../context/SessionContext";
 
 export default function ProtectedRoute({ children, allowedRoles }) {
+  const { session, loading: sessionLoading, redirecting } = useSession();
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState(null);
   const [hasAccess, setHasAccess] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
 
   useEffect(() => {
-    async function checkUser() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    let active = true;
 
-      setSession(session);
+    async function checkProfile(currentSession) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('must_change_password, role')
+        .eq('id', currentSession.user.id)
+        .single();
 
-      if (session) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('must_change_password, role')
-          .eq('id', session.user.id)
-          .single();
+      if (!active) return;
 
-        if (profile?.must_change_password) {
-          setMustChangePassword(true);
-        }
+      if (profile?.must_change_password) {
+        setMustChangePassword(true);
+      }
 
-        if (allowedRoles) {
-          const storedUser = localStorage.getItem('popdev_user');
-          if (profile && !allowedRoles.includes(profile.role)) {
-            setHasAccess(false);
-          } else if (storedUser) {
-            try {
-              const userProfile = JSON.parse(storedUser);
-              if (!allowedRoles.includes(userProfile.role)) {
-                setHasAccess(false);
-              }
-            } catch (e) {
+      if (allowedRoles) {
+        const storedUser = localStorage.getItem('popdev_user');
+        if (profile && !allowedRoles.includes(profile.role)) {
+          setHasAccess(false);
+        } else if (storedUser) {
+          try {
+            const userProfile = JSON.parse(storedUser);
+            if (!allowedRoles.includes(userProfile.role)) {
               setHasAccess(false);
             }
-          } else {
+          } catch (e) {
             setHasAccess(false);
           }
+        } else {
+          setHasAccess(false);
         }
       }
+
       setLoading(false);
     }
 
-    checkUser();
+    if (session) {
+      checkProfile(session);
+    } else if (!sessionLoading) {
+      setLoading(false);
+    }
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+    return () => {
+      active = false;
+    };
+  }, [session, sessionLoading, allowedRoles]);
 
-    return () => subscription.unsubscribe();
-  }, [allowedRoles]);
+  // The session provider owns the redirect for any provider-initiated logout
+  // (idle timeout or manual). Rendering nothing here stops this route from
+  // racing it with a generic "please log in first" message.
+  if (redirecting) return null;
 
-  if (loading) return <h2>Loading...</h2>;
+  if (loading || sessionLoading) return <h2>Loading...</h2>;
 
   if (!session) {
     return <Navigate to="/login" state={{ message: 'Please log in first to access this page.' }} replace />;

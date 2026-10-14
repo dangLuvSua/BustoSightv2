@@ -1,0 +1,132 @@
+/* ============================================
+   SESSION TIMEOUT - Idle warning dialog
+   Reuses the .fb-dialog* primitives from
+   feedback.css; only session-specific bits here.
+   ============================================ */
+
+.sd-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 22px 0 4px;
+}
+
+.sd-time {
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary-dark);
+}
+
+.sd-time.sd-urgent {
+  color: #c53030;
+}
+
+.sd-time-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-500);
+}
+
+.sd-progress-track {
+  width: 100%;
+  height: 6px;
+  margin-top: 18px;
+  background: var(--gray-200);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sd-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary-light), var(--primary-dark));
+  border-radius: 999px;
+  transition: width 1s linear;
+}
+
+.sd-progress-fill.sd-urgent {
+  background: linear-gradient(90deg, #fc8181, #c53030);
+}
+
+.sd-hint {
+  margin-top: 16px;
+  padding: 11px 14px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--gray-600);
+  line-height: 1.5;
+}
+
+.sd-hint strong {
+  color: var(--gray-700);
+}
+
+/* Progress ring variant shown behind the countdown */
+.sd-ring-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 20px 0 4px;
+}
+
+.sd-ring {
+  transform: rotate(-90deg);
+}
+
+.sd-ring-track {
+  stroke: var(--gray-200);
+}
+
+.sd-ring-fill {
+  stroke: var(--accent);
+  transition: stroke-dashoffset 1s linear;
+}
+
+.sd-ring-fill.sd-urgent {
+  stroke: #c53030;
+}
+
+.sd-ring-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.sd-ring-time {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary-dark);
+}
+
+.sd-ring-time.sd-urgent {
+  color: #c53030;
+}
+
+.sd-ring-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-500);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-progress-fill,
+  .sd-ring-fill {
+    transition: none;
+  }
+}

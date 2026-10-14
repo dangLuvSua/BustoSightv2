@@ -72,6 +72,100 @@
   letter-spacing: 1px;
 }
 
+/* Step title + Previous control share a row. min-width:0 lets the long step
+   title shrink and ellipsis instead of pushing/overlapping the button. */
+.form-blue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.form-blue-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.form-blue-header-left h1 {
+  margin: 0;
+  font-size: 18px;
+  text-transform: none;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-header-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 9px 16px;
+  background: white;
+  border: 1px solid var(--gray-300);
+  color: var(--gray-700);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-header-back:hover:not(:disabled) {
+  background: var(--gray-50);
+  border-color: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.btn-header-back:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-header-back:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Keeps "Next" flush right now that the Previous button has moved. */
+.form-nav-spacer {
+  flex: 1;
+}
+
+/* Inline field validation message (e.g. invalid Date of Birth). */
+.err-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #dc2626;
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-top: 6px;
+  animation: fadeInScale 0.2s ease-out forwards;
+}
+
+.err-msg::before {
+  content: "⚠️";
+  font-size: 11px;
+}
+
+/* Red state for an invalid input. Mirrors ManageAccounts.css, which this page
+   does not import. */
+.input-error {
+  border-color: #ef4444 !important;
+  background-color: #fef2f2 !important;
+  color: #991b1b;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important;
+}
+
+.input-error:focus {
+  border-color: #dc2626 !important;
+}
+
 /* Fixed Header Layout for Add Resident Page */
 .add-resident-content {
   display: flex;
