@@ -286,35 +286,25 @@ export default function AddResident() {
     if (step === 3) {
       for (let i = 0; i < members.length; i += 1) {
         const member = members[i];
-        const hasAnyMemberValue =
-          member.lname ||
-          member.fname ||
-          member.rel ||
-          member.dob ||
-          member.pob ||
-          member.religion ||
-          member.edu ||
-          member.occupation;
-        if (hasAnyMemberValue) {
-          if (!member.lname) return `Member ${i + 1} is missing a Last Name.`;
-          const lnameErr = getNameError(member.lname);
-          if (lnameErr) return `Member ${i + 1} last name: ${lnameErr}`;
+        // Every added member must have at minimum: first name, last name, relationship.
+        if (!member.lname) return `Member ${i + 1} is missing a Last Name.`;
+        const lnameErr = getNameError(member.lname);
+        if (lnameErr) return `Member ${i + 1} last name: ${lnameErr}`;
 
-          if (!member.fname) return `Member ${i + 1} is missing a First Name.`;
-          const fnameErr = getNameError(member.fname);
-          if (fnameErr) return `Member ${i + 1} first name: ${fnameErr}`;
+        if (!member.fname) return `Member ${i + 1} is missing a First Name.`;
+        const fnameErr = getNameError(member.fname);
+        if (fnameErr) return `Member ${i + 1} first name: ${fnameErr}`;
 
-          if (member.mname) {
-            const mnameErr = getNameError(member.mname);
-            if (mnameErr) return `Member ${i + 1} middle name: ${mnameErr}`;
-          }
-
-          if (!member.rel)
-            return `Member ${i + 1} is missing a Relationship to Head.`;
-
-          const memberDobErr = getDobError(member.dob);
-          if (memberDobErr) return `Member ${i + 1}: ${memberDobErr}`;
+        if (member.mname) {
+          const mnameErr = getNameError(member.mname);
+          if (mnameErr) return `Member ${i + 1} middle name: ${mnameErr}`;
         }
+
+        if (!member.rel)
+          return `Member ${i + 1} is missing a Relationship to Head.`;
+
+        const memberDobErr = getDobError(member.dob);
+        if (memberDobErr) return `Member ${i + 1}: ${memberDobErr}`;
       }
     }
 
@@ -385,6 +375,15 @@ export default function AddResident() {
       const warning = validateStep();
       if (warning) {
         setFormWarning(warning);
+        toast.error(warning);
+        // If the error is about a specific member, expand that member card.
+        if (currentStep === 3) {
+          const match = warning.match(/^Member (\d+)/);
+          if (match) {
+            const memberIdx = parseInt(match[1], 10) - 1;
+            setExpandedMemberIndex(memberIdx);
+          }
+        }
         return;
       }
     }
@@ -1403,6 +1402,9 @@ export default function AddResident() {
                           [m.fname, m.mname, m.lname]
                             .filter(Boolean)
                             .join(" ") || `Member ${i + 1}`;
+                        // Show a red badge when collapsed and required fields are missing.
+                        const isMemberIncomplete =
+                          !m.lname || !m.fname || !m.rel;
 
                         return (
                           <div
@@ -1470,6 +1472,23 @@ export default function AddResident() {
                                 >
                                   {fullName} {m.rel ? `(${m.rel})` : ""}
                                 </span>
+                                {!isExpanded && isMemberIncomplete && (
+                                  <span
+                                    style={{
+                                      background: "#ef4444",
+                                      color: "white",
+                                      fontSize: "10px",
+                                      fontWeight: "700",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                      letterSpacing: "0.4px",
+                                      textTransform: "uppercase",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    Incomplete
+                                  </span>
+                                )}
                               </div>
                               <div
                                 className="member-card-actions"
