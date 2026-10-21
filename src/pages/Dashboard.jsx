@@ -12,6 +12,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
+import ChartDataLabels from "chartjs-plugin-datalabels";
 import { Bar, Line, Pie } from "react-chartjs-2";
 import Sidebar from "../components/Sidebar";
 import UserProfileBadge from "../components/UserProfileBadge";
@@ -29,7 +30,13 @@ ChartJS.register(
   Tooltip,
   Legend,
   Filler,
+  ChartDataLabels,
 );
+
+// Disable datalabels globally by default so only charts configured for it show them
+ChartJS.defaults.plugins.datalabels = {
+  display: false,
+};
 
 const BARANGAY_ORDER = [
   "Bonga Mayor",
@@ -49,7 +56,92 @@ const BARANGAY_ORDER = [
 ];
 
 const chartOpts = { responsive: true, maintainAspectRatio: false };
-const barOpts = {
+
+const getPieChartOpts = (customPlugins = {}) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      display: true,
+      position: "bottom",
+      labels: {
+        boxWidth: 12,
+        padding: 12,
+        font: { size: 11, weight: "normal" },
+        generateLabels: (chart) => {
+          const data = chart.data;
+          if (data.labels?.length && data.datasets?.length) {
+            const dataset = data.datasets[0];
+            const total = dataset.data.reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+            return data.labels.map((label, i) => {
+              const val = Number(dataset.data[i]) || 0;
+              const pct = total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
+              const meta = chart.getDatasetMeta(0);
+              const style = meta?.controller?.getStyle(i) || {};
+              const isHidden = chart.getDataVisibility ? !chart.getDataVisibility(i) : false;
+              return {
+                text: `${label} (${pct}%)`,
+                fillStyle: style.backgroundColor || (Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[i] : dataset.backgroundColor),
+                strokeStyle: style.borderColor || "#ffffff",
+                lineWidth: 1,
+                hidden: isHidden,
+                index: i,
+              };
+            });
+          }
+          return [];
+        },
+      },
+      onClick: (e, legendItem, legend) => {
+        const chart = legend.chart;
+        if (chart.toggleDataVisibility) {
+          chart.toggleDataVisibility(legendItem.index);
+          chart.update();
+        }
+      },
+    },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = Number(context.raw) || 0;
+          const total = context.dataset.data.reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+          const pct = total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
+          const label = context.label || "";
+          return ` ${label}: ${val.toLocaleString()} (${pct}%)`;
+        },
+      },
+    },
+    datalabels: {
+      display: (ctx) => {
+        if (ctx.chart.getDataVisibility && !ctx.chart.getDataVisibility(ctx.dataIndex)) return false;
+        const data = ctx.dataset.data;
+        const total = data.reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+        const val = Number(data[ctx.dataIndex]) || 0;
+        return total > 0 && (val / total) >= 0.04;
+      },
+      formatter: (val, ctx) => {
+        const data = ctx.dataset.data;
+        const total = data.reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+        if (!total) return "";
+        const pct = ((Number(val) / total) * 100).toFixed(1);
+        return `${pct}%`;
+      },
+      color: (ctx) => {
+        const bg = ctx.dataset.backgroundColor;
+        const color = Array.isArray(bg) ? bg[ctx.dataIndex] : bg;
+        const lightColors = ["#fcd34d", "#fca5a5", "#fbcfe8", "#e2e8f0", "#81c784", "#94a3b8"];
+        return lightColors.includes(color) ? "#1e293b" : "#ffffff";
+      },
+      font: {
+        weight: "bold",
+        size: 11,
+      },
+    },
+    ...customPlugins,
+  },
+});
+
+const getBrgyBarOpts = (totalPopulation) => ({
   ...chartOpts,
   indexAxis: "y",
   plugins: {
@@ -59,12 +151,207 @@ const barOpts = {
       align: "end",
       labels: { boxWidth: 12, font: { size: 10 } },
     },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = Number(context.raw) || 0;
+          const total = totalPopulation || 1;
+          const pct = ((val / total) * 100).toFixed(1);
+          return ` Population: ${val.toLocaleString()} (${pct}% of municipality)`;
+        },
+      },
+    },
+    datalabels: {
+      display: true,
+      anchor: "end",
+      align: "right",
+      offset: 4,
+      formatter: (val) => {
+        const total = totalPopulation || 1;
+        const pct = ((Number(val) / total) * 100).toFixed(1);
+        return `${pct}%`;
+      },
+      color: "#475569",
+      font: { size: 10, weight: "bold" },
+    },
   },
   scales: {
-    y: { ticks: { font: { size: 9 } }, grid: { display: false } },
+    y: { ticks: { font: { size: 10 } }, grid: { display: false } },
+    x: {
+      ticks: { font: { size: 10 } },
+      grid: { display: false },
+      grace: "10%",
+    },
+  },
+});
+
+const getDemographicBarOpts = (totalCount, categoryLabel, labelColor = "#3b82f6") => ({
+  ...chartOpts,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = Number(context.raw) || 0;
+          const total = totalCount || 1;
+          const pct = total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
+          return ` ${categoryLabel}: ${val.toLocaleString()} (${pct}% of total)`;
+        },
+      },
+    },
+    datalabels: {
+      display: (ctx) => Number(ctx.dataset.data[ctx.dataIndex]) > 0,
+      anchor: "end",
+      align: "top",
+      offset: 2,
+      formatter: (val) => {
+        const total = totalCount || 1;
+        return total > 0 ? `${((Number(val) / total) * 100).toFixed(1)}%` : "";
+      },
+      color: labelColor,
+      font: { size: 9, weight: "bold" },
+    },
+  },
+  scales: {
+    x: { ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 }, grid: { display: false } },
+    y: { ticks: { font: { size: 9 } }, grid: { display: false }, grace: "12%" },
+  },
+});
+
+const getTeenPregBarOpts = (totalCases, totalMothers) => ({
+  ...chartOpts,
+  plugins: {
+    legend: {
+      display: true,
+      position: "top",
+      align: "end",
+      labels: { boxWidth: 12, font: { size: 10 } },
+    },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = Number(context.raw) || 0;
+          const isCases = context.datasetIndex === 0;
+          const total = isCases ? (totalCases || 1) : (totalMothers || 1);
+          const pct = total > 0 ? ((val / total) * 100).toFixed(1) : "0.0";
+          const label = context.dataset.label || "";
+          return ` ${label}: ${val.toLocaleString()} (${pct}% of total)`;
+        },
+      },
+    },
+    datalabels: {
+      display: (ctx) => Number(ctx.dataset.data[ctx.dataIndex]) > 0,
+      anchor: "end",
+      align: "top",
+      offset: 2,
+      formatter: (val, ctx) => {
+        const isCases = ctx.datasetIndex === 0;
+        const total = isCases ? (totalCases || 1) : (totalMothers || 1);
+        return total > 0 ? `${((Number(val) / total) * 100).toFixed(0)}%` : "";
+      },
+      color: (ctx) => (ctx.datasetIndex === 0 ? "#dc2626" : "#e11d48"),
+      font: { size: 8.5, weight: "bold" },
+    },
+  },
+  scales: {
+    x: { ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 }, grid: { display: false } },
+    y: { ticks: { font: { size: 9 } }, grid: { display: false }, grace: "14%" },
+  },
+});
+
+const getAgeChartOpts = (totalPop) => ({
+  ...chartOpts,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = Number(context.raw) || 0;
+          const total = totalPop || 1;
+          const pct = ((val / total) * 100).toFixed(1);
+          return ` ${context.label}: ${val.toLocaleString()} (${pct}% of population)`;
+        },
+      },
+    },
+    datalabels: {
+      display: true,
+      anchor: "end",
+      align: "top",
+      offset: 4,
+      formatter: (val) => {
+        const total = totalPop || 1;
+        const pct = ((Number(val) / total) * 100).toFixed(1);
+        return `${Number(val).toLocaleString()} (${pct}%)`;
+      },
+      color: "#1d4ed8",
+      font: { size: 11, weight: "bold" },
+    },
+  },
+  scales: {
+    x: { ticks: { font: { size: 10, weight: "600" } }, grid: { display: false } },
+    y: { ticks: { font: { size: 9 } }, grid: { display: false }, grace: "15%" },
+  },
+});
+
+const getYearlyPopLineOpts = (yearlyData) => ({
+  ...chartOpts,
+  plugins: {
+    legend: { position: "top" },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const currVal = Number(context.raw) || 0;
+          const idx = context.dataIndex;
+          if (idx > 0 && yearlyData[idx - 1]) {
+            const prevVal = yearlyData[idx - 1].count;
+            if (prevVal > 0) {
+              const diff = currVal - prevVal;
+              const pct = ((diff / prevVal) * 100).toFixed(1);
+              const sign = diff >= 0 ? "+" : "";
+              return ` Population: ${currVal.toLocaleString()} (${sign}${pct}% vs ${yearlyData[idx - 1].year})`;
+            }
+          }
+          return ` Population: ${currVal.toLocaleString()}`;
+        },
+      },
+    },
+  },
+  scales: {
+    y: { beginAtZero: true, grid: { color: "#edf2f7" } },
+    x: { grid: { display: false } },
+  },
+});
+
+const getForecastLineOpts = (lastActualValue, lastActualYear) => ({
+  ...chartOpts,
+  plugins: {
+    legend: { position: "top", labels: { boxWidth: 12, font: { size: 10 } } },
+    tooltip: {
+      callbacks: {
+        label: (context) => {
+          const val = context.raw;
+          if (val === null || val === undefined) return null;
+          const numVal = Number(val);
+          const isProjection = context.datasetIndex === 1;
+          const datasetLabel = context.dataset.label || "";
+          if (isProjection && lastActualValue && lastActualValue > 0) {
+            const diff = numVal - lastActualValue;
+            const pct = ((diff / lastActualValue) * 100).toFixed(1);
+            const sign = diff >= 0 ? "+" : "";
+            const yearRef = lastActualYear ? ` vs ${lastActualYear}` : " vs baseline";
+            return ` ${datasetLabel}: ${numVal.toLocaleString()} (${sign}${pct}%${yearRef})`;
+          }
+          return ` ${datasetLabel}: ${numVal.toLocaleString()}`;
+        },
+      },
+    },
+  },
+  scales: {
+    y: { ticks: { font: { size: 9 } }, grid: { color: "#f1f5f9" } },
     x: { ticks: { font: { size: 9 } }, grid: { display: false } },
   },
-};
+});
+
 
 
 
@@ -588,36 +875,49 @@ export default function Dashboard() {
     { label: "Solo Parents", value: stats.totalSoloParent.toLocaleString() },
   ];
 
+  const popGrowthPct = stats.totalPopulation > 0
+    ? (((projected5yr - stats.totalPopulation) / stats.totalPopulation) * 100).toFixed(1)
+    : "0.0";
+  const seniorGrowthPct = stats.seniorCount > 0
+    ? (((projectedSeniors5yr - stats.seniorCount) / stats.seniorCount) * 100).toFixed(1)
+    : "0.0";
+  const genderTotal = (stats.maleCount + stats.femaleCount + stats.lgbtCount) || stats.totalPopulation || 1;
+  const malePct = ((stats.maleCount / genderTotal) * 100).toFixed(1);
+  const femalePct = ((stats.femaleCount / genderTotal) * 100).toFixed(1);
+  const lgbtPct = ((stats.lgbtCount / genderTotal) * 100).toFixed(1);
+  const fourPsPct = stats.totalPopulation > 0 ? ((stats.total4ps / stats.totalPopulation) * 100).toFixed(1) : "0.0";
+  const soloParentPct = stats.totalPopulation > 0 ? ((stats.totalSoloParent / stats.totalPopulation) * 100).toFixed(1) : "0.0";
+
   const FORECAST_CARDS = [
     {
       title: "Total Population Growth",
       body: [
         { label: "Current:", value: stats.totalPopulation.toLocaleString() },
-        { label: "5-Year Projection:", value: projected5yr.toLocaleString() },
+        { label: "5-Year Projection:", value: `${projected5yr.toLocaleString()} (${Number(popGrowthPct) >= 0 ? "+" : ""}${popGrowthPct}%)` },
       ],
-      tag: "↗ Linear Regression Projection",
+      tag: `↗ ${Number(popGrowthPct) >= 0 ? "+" : ""}${popGrowthPct}% Linear Regression Projection`,
       footer:
         "Analyzes the current database census metrics and projects growth using a fitted linear regression slope.",
     },
     {
       title: "Senior Population",
       body: [
-        { label: "Ages 60+:", value: stats.seniorCount.toLocaleString() },
+        { label: "Ages 60+:", value: `${stats.seniorCount.toLocaleString()} (${stats.totalPopulation > 0 ? ((stats.seniorCount / stats.totalPopulation) * 100).toFixed(1) : "0.0"}% of pop)` },
         {
           label: "Projected (5yr):",
-          value: projectedSeniors5yr.toLocaleString(),
+          value: `${projectedSeniors5yr.toLocaleString()} (${Number(seniorGrowthPct) >= 0 ? "+" : ""}${seniorGrowthPct}%)`,
         },
       ],
-      tag: "↗ Aging Linear Regression",
+      tag: `↗ ${Number(seniorGrowthPct) >= 0 ? "+" : ""}${seniorGrowthPct}% Aging Linear Regression`,
       footer:
         "Utilizes linear regression models on aging rates to project senior demographic counts in 5 years.",
     },
     {
       title: "Gender Breakdown",
       body: [
-        { label: "Male:", value: stats.maleCount.toLocaleString() },
-        { label: "Female:", value: stats.femaleCount.toLocaleString() },
-        { label: "LGBTQ+:", value: stats.lgbtCount.toLocaleString() },
+        { label: "Male:", value: `${stats.maleCount.toLocaleString()} (${malePct}%)` },
+        { label: "Female:", value: `${stats.femaleCount.toLocaleString()} (${femalePct}%)` },
+        { label: "LGBTQ+:", value: `${stats.lgbtCount.toLocaleString()} (${lgbtPct}%)` },
       ],
       footer:
         "Gender distribution of the current resident population from the uploaded demographic data.",
@@ -625,10 +925,10 @@ export default function Dashboard() {
     {
       title: "4Ps & Solo Parents",
       body: [
-        { label: "4Ps Beneficiaries:", value: stats.total4ps.toLocaleString() },
+        { label: "4Ps Beneficiaries:", value: `${stats.total4ps.toLocaleString()} (${fourPsPct}% of pop)` },
         {
           label: "Solo Parents:",
-          value: stats.totalSoloParent.toLocaleString(),
+          value: `${stats.totalSoloParent.toLocaleString()} (${soloParentPct}% of pop)`,
         },
       ],
       footer:
@@ -657,7 +957,7 @@ export default function Dashboard() {
         <div className="chart-item">
           <h4>Gender Distribution</h4>
           <div className="chart-container pie-box">
-            {!isLoading && <Pie data={pieChartData} options={chartOpts} />}
+            {!isLoading && <Pie data={pieChartData} options={getPieChartOpts()} />}
           </div>
         </div>
 
@@ -681,14 +981,7 @@ export default function Dashboard() {
                     },
                   ],
                 }}
-                options={{
-                  ...chartOpts,
-                  plugins: { legend: { position: "top" } },
-                  scales: {
-                    y: { beginAtZero: true, grid: { color: "#edf2f7" } },
-                    x: { grid: { display: false } },
-                  },
-                }}
+                options={getYearlyPopLineOpts(yearlyPopData)}
               />
             )}
             {!isLoading && yearlyPopData.length === 0 && (
@@ -732,7 +1025,7 @@ export default function Dashboard() {
               {!isLoading && (
                 <Bar
                   data={barChartData}
-                  options={{ ...barOpts, maintainAspectRatio: false }}
+                  options={getBrgyBarOpts(stats.totalPopulation)}
                 />
               )}
             </div>
@@ -1055,13 +1348,13 @@ export default function Dashboard() {
           <div className="chart-item">
             <h4>Senior Citizen ID Status</h4>
             <div className="chart-container pie-box">
-              {!isLoading && <Pie data={seniorPieData} options={chartOpts} />}
+              {!isLoading && <Pie data={seniorPieData} options={getPieChartOpts()} />}
             </div>
           </div>
           <div className="chart-item">
             <h4>Seniors by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={seniorBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={seniorBarData} options={getDemographicBarOpts(stats.totalSeniors, "Seniors", "#d97706")} />}
             </div>
           </div>
         </div>
@@ -1071,13 +1364,13 @@ export default function Dashboard() {
           <div className="chart-item">
             <h4>PWD ID Card Status</h4>
             <div className="chart-container pie-box">
-              {!isLoading && <Pie data={pwdPieData} options={chartOpts} />}
+              {!isLoading && <Pie data={pwdPieData} options={getPieChartOpts()} />}
             </div>
           </div>
           <div className="chart-item">
             <h4>PWDs by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={pwdBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={pwdBarData} options={getDemographicBarOpts(stats.totalPwd, "PWD", "#15803d")} />}
             </div>
           </div>
         </div>
@@ -1087,27 +1380,13 @@ export default function Dashboard() {
           <div className="chart-item">
             <h4>4Ps Beneficiaries Ratio</h4>
             <div className="chart-container pie-box">
-              {!isLoading && <Pie data={fourPsPieData} options={chartOpts} />}
-            </div>
-            <div
-              style={{
-                marginTop: "12px",
-                fontSize: "12px",
-                color: "#64748b",
-                textAlign: "center",
-              }}
-            >
-              <span>
-                <b>4Ps Enrolled:</b> {stats.total4ps.toLocaleString()} |{" "}
-                <b>Non-4Ps:</b>{" "}
-                {Math.max(0, stats.totalPopulation - stats.total4ps).toLocaleString()}
-              </span>
+              {!isLoading && <Pie data={fourPsPieData} options={getPieChartOpts()} />}
             </div>
           </div>
           <div className="chart-item">
             <h4>4Ps Beneficiaries by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={fourPsBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={fourPsBarData} options={getDemographicBarOpts(stats.total4ps, "4Ps Beneficiaries", "#d97706")} />}
             </div>
           </div>
         </div>
@@ -1117,74 +1396,47 @@ export default function Dashboard() {
           <div className="chart-item">
             <h4>Solo Parent ID Status</h4>
             <div className="chart-container pie-box">
-              {!isLoading && <Pie data={soloParentPieData} options={chartOpts} />}
-            </div>
-            <div
-              style={{
-                marginTop: "12px",
-                fontSize: "12px",
-                color: "#64748b",
-                textAlign: "center",
-              }}
-            >
-              <span>
-                <b>With ID:</b> {stats.soloParentWithId.toLocaleString()} |{" "}
-                <b>No ID:</b> {stats.soloParentNoId.toLocaleString()}
-              </span>
+              {!isLoading && <Pie data={soloParentPieData} options={getPieChartOpts()} />}
             </div>
           </div>
           <div className="chart-item">
             <h4>Solo Parents by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={soloParentBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={soloParentBarData} options={getDemographicBarOpts(stats.totalSoloParent, "Solo Parents", "#be185d")} />}
             </div>
           </div>
         </div>
 
-        {/* Row 4: Voters */}
+        {/* Row 5: Voters */}
         <div className="charts-grid" style={{ marginTop: "24px" }}>
           <div className="chart-item">
             <h4>Voter Registration Status</h4>
             <div className="chart-container pie-box">
-              {!isLoading && <Pie data={voterPieData} options={chartOpts} />}
+              {!isLoading && <Pie data={voterPieData} options={getPieChartOpts()} />}
             </div>
           </div>
           <div className="chart-item">
             <h4>Registered Voters by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={voterBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={voterBarData} options={getDemographicBarOpts(stats.totalVoters || stats.registeredVoters, "Registered Voters", "#0f766e")} />}
             </div>
           </div>
         </div>
 
-        {/* Row 5: Employment & Pregnancy */}
+        {/* Row 6: Employment & Pregnancy */}
         <div className="charts-grid" style={{ marginTop: "24px" }}>
           <div className="chart-item">
             <h4>Employment Status Breakdown</h4>
             <div className="chart-container pie-box">
               {!isLoading && (
-                <Pie data={employmentPieData} options={chartOpts} />
+                <Pie data={employmentPieData} options={getPieChartOpts()} />
               )}
-            </div>
-            <div
-              style={{
-                marginTop: "12px",
-                fontSize: "12px",
-                color: "#64748b",
-                textAlign: "center",
-              }}
-            >
-              <span>
-                <b>Employed:</b> {stats.employed.toLocaleString()} |{" "}
-                <b>Unemployed / Students / Other:</b>{" "}
-                {stats.unemployed.toLocaleString()}
-              </span>
             </div>
           </div>
           <div className="chart-item">
             <h4>Teenage Pregnancy by Barangay</h4>
             <div className="chart-container">
-              {!isLoading && <Bar data={teenPregBarData} options={chartOpts} />}
+              {!isLoading && <Bar data={teenPregBarData} options={getTeenPregBarOpts(stats.teenPregnancyCases, stats.currentTeenMothers)} />}
             </div>
           </div>
         </div>
@@ -1219,8 +1471,27 @@ export default function Dashboard() {
         <div className="chart-item">
           <h4>Age Group Distribution</h4>
           <div className="chart-container">
-            {!isLoading && <Bar data={ageChartData} options={chartOpts} />}
+            {!isLoading && <Bar data={ageChartData} options={getAgeChartOpts(stats.totalPopulation)} />}
           </div>
+          {(() => {
+            const ageTotal = (stats.childrenCount + stats.workingAgeCount + stats.seniorCount) || stats.totalPopulation || 1;
+            const chPct = ((stats.childrenCount / ageTotal) * 100).toFixed(1);
+            const waPct = ((stats.workingAgeCount / ageTotal) * 100).toFixed(1);
+            const snPct = ((stats.seniorCount / ageTotal) * 100).toFixed(1);
+            return (
+              <div className="chart-sub-summary" style={{ marginTop: "10px" }}>
+                <span className="sub-badge">
+                  Children (0–17): <strong>{stats.childrenCount.toLocaleString()}</strong> <span className="sub-pct">{chPct}%</span>
+                </span>
+                <span className="sub-badge">
+                  Working-Age (18–59): <strong>{stats.workingAgeCount.toLocaleString()}</strong> <span className="sub-pct">{waPct}%</span>
+                </span>
+                <span className="sub-badge">
+                  Seniors (60+): <strong>{stats.seniorCount.toLocaleString()}</strong> <span className="sub-pct">{snPct}%</span>
+                </span>
+              </div>
+            );
+          })()}
           <p className="chart-note">
             Breakdown of current residents by age group: Children (0–17),
             Working-Age (18–59), Seniors (60+).
@@ -1230,7 +1501,15 @@ export default function Dashboard() {
         <div className="chart-item">
           <h4>Growth Trends (Linear Regression)</h4>
           <div className="chart-container">
-            {!isLoading && <Line data={lineChartData} options={chartOpts} />}
+            {!isLoading && (
+              <Line
+                data={lineChartData}
+                options={getForecastLineOpts(
+                  pop.actualData?.[pop.actualData.length - 1],
+                  pop.historicalLabels?.[pop.historicalLabels.length - 1],
+                )}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1239,7 +1518,15 @@ export default function Dashboard() {
         <div className="chart-item">
           <h4>Voters Prediction (Linear Regression)</h4>
           <div className="chart-container">
-            {!isLoading && <Line data={votersLineData} options={chartOpts} />}
+            {!isLoading && (
+              <Line
+                data={votersLineData}
+                options={getForecastLineOpts(
+                  vot.actualData?.[vot.actualData.length - 1],
+                  vot.historicalLabels?.[vot.historicalLabels.length - 1],
+                )}
+              />
+            )}
           </div>
           <p className="chart-note">
             Projected registered voter count for the next 5 years based on
@@ -1251,7 +1538,13 @@ export default function Dashboard() {
           <h4>Employment Prediction (Linear Regression)</h4>
           <div className="chart-container">
             {!isLoading && (
-              <Line data={employmentLineData} options={chartOpts} />
+              <Line
+                data={employmentLineData}
+                options={getForecastLineOpts(
+                  emp.actualData?.[emp.actualData.length - 1],
+                  emp.historicalLabels?.[emp.historicalLabels.length - 1],
+                )}
+              />
             )}
           </div>
           <p className="chart-note">
@@ -1267,7 +1560,15 @@ export default function Dashboard() {
         <div className="chart-item">
           <h4>Teenage Pregnancy Prediction (Linear Regression)</h4>
           <div className="chart-container" style={{ height: "300px" }}>
-            {!isLoading && <Line data={teenPregLineData} options={chartOpts} />}
+            {!isLoading && (
+              <Line
+                data={teenPregLineData}
+                options={getForecastLineOpts(
+                  tpg.actualData?.[tpg.actualData.length - 1],
+                  tpg.historicalLabels?.[tpg.historicalLabels.length - 1],
+                )}
+              />
+            )}
           </div>
           <p className="chart-note">
             Estimated teenage pregnancy cases forecast using linear regression
@@ -1413,27 +1714,35 @@ export default function Dashboard() {
               </span>
             </div>
             <div className="dist-list">
-              {brgyData.map((item) => {
-                let val = item.count;
-                if (modal.category.toLowerCase().includes("household"))
-                  val = item.households;
-                else if (modal.category.toLowerCase().includes("senior"))
-                  val = item.seniors;
-                else if (modal.category.toLowerCase().includes("voter"))
-                  val = item.voters;
-                else if (modal.category.toLowerCase().includes("pwd"))
-                  val = item.pwd;
-                else if (modal.category.toLowerCase().includes("4p"))
-                  val = item.fourPs;
-                else if (modal.category.toLowerCase().includes("solo"))
-                  val = item.soloParents;
-                return (
-                  <div key={item.name} className="dist-item">
-                    <span>{item.name}</span>
-                    <span>{val.toLocaleString()}</span>
-                  </div>
-                );
-              })}
+              {(() => {
+                const cat = modal.category.toLowerCase();
+                const getItemVal = (item) => {
+                  if (cat.includes("household")) return item.households;
+                  if (cat.includes("senior")) return item.seniors;
+                  if (cat.includes("voter")) return item.voters;
+                  if (cat.includes("pwd")) return item.pwd;
+                  if (cat.includes("4p")) return item.fourPs;
+                  if (cat.includes("solo")) return item.soloParents;
+                  return item.count;
+                };
+                const totalModalVal = brgyData.reduce((acc, curr) => acc + getItemVal(curr), 0);
+
+                return brgyData.map((item) => {
+                  const val = getItemVal(item);
+                  const pct = totalModalVal > 0 ? ((val / totalModalVal) * 100).toFixed(1) : "0.0";
+                  return (
+                    <div key={item.name} className="dist-item">
+                      <span>{item.name}</span>
+                      <span style={{ fontWeight: 600 }}>
+                        {val.toLocaleString()}
+                        <span style={{ color: "#3b82f6", fontSize: "12px", marginLeft: "6px", fontWeight: "bold" }}>
+                          ({pct}%)
+                        </span>
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>

@@ -598,3 +598,40 @@
   font-weight: 700;
   padding: 6px 8px;
 }
+
+/* Chart Percentage Sub-summaries & Badges */
+.chart-sub-summary {
+  margin-top: 14px;
+  font-size: 11.5px;
+  color: var(--gray-600);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chart-sub-summary .sub-badge {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--gray-700);
+}
+
+.chart-sub-summary .sub-badge strong {
+  color: var(--primary-dark);
+}
+
+.chart-sub-summary .sub-pct {
+  color: var(--primary);
+  font-weight: 700;
+  background: rgba(93, 135, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
