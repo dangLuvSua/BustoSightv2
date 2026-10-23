@@ -57,6 +57,15 @@ const BARANGAY_ORDER = [
 
 const chartOpts = { responsive: true, maintainAspectRatio: false };
 
+// Shared legend styling so every chart keeps the same compact, muted key
+const chartLegendLabels = {
+  boxWidth: 12,
+  boxHeight: 12,
+  padding: 10,
+  color: "#4a5568",
+  font: { size: 10 },
+};
+
 const getPieChartOpts = (customPlugins = {}) => ({
   responsive: true,
   maintainAspectRatio: false,
@@ -65,9 +74,11 @@ const getPieChartOpts = (customPlugins = {}) => ({
       display: true,
       position: "bottom",
       labels: {
-        boxWidth: 12,
-        padding: 12,
-        font: { size: 11, weight: "normal" },
+        boxWidth: 10,
+        boxHeight: 10,
+        padding: 10,
+        color: "#64748b",
+        font: { size: 10, weight: "normal" },
         generateLabels: (chart) => {
           const data = chart.data;
           if (data.labels?.length && data.datasets?.length) {
@@ -80,7 +91,7 @@ const getPieChartOpts = (customPlugins = {}) => ({
               const style = meta?.controller?.getStyle(i) || {};
               const isHidden = chart.getDataVisibility ? !chart.getDataVisibility(i) : false;
               return {
-                text: `${label} (${pct}%)`,
+                text: `${label} · ${pct}%`,
                 fillStyle: style.backgroundColor || (Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[i] : dataset.backgroundColor),
                 strokeStyle: style.borderColor || "#ffffff",
                 lineWidth: 1,
@@ -134,7 +145,7 @@ const getPieChartOpts = (customPlugins = {}) => ({
       },
       font: {
         weight: "bold",
-        size: 11,
+        size: 10.5,
       },
     },
     ...customPlugins,
@@ -149,7 +160,7 @@ const getBrgyBarOpts = (totalPopulation) => ({
       display: true,
       position: "top",
       align: "end",
-      labels: { boxWidth: 12, font: { size: 10 } },
+      labels: { ...chartLegendLabels },
     },
     tooltip: {
       callbacks: {
@@ -225,7 +236,7 @@ const getTeenPregBarOpts = (totalCases, totalMothers) => ({
       display: true,
       position: "top",
       align: "end",
-      labels: { boxWidth: 12, font: { size: 10 } },
+      labels: { ...chartLegendLabels },
     },
     tooltip: {
       callbacks: {
@@ -274,29 +285,32 @@ const getAgeChartOpts = (totalPop) => ({
       },
     },
     datalabels: {
-      display: true,
+      display: (ctx) => Number(ctx.dataset.data[ctx.dataIndex]) > 0,
       anchor: "end",
       align: "top",
       offset: 4,
       formatter: (val) => {
         const total = totalPop || 1;
-        const pct = ((Number(val) / total) * 100).toFixed(1);
-        return `${Number(val).toLocaleString()} (${pct}%)`;
+        return total > 0 ? `${((Number(val) / total) * 100).toFixed(1)}%` : "";
       },
       color: "#1d4ed8",
-      font: { size: 11, weight: "bold" },
+      font: { size: 10.5, weight: "bold" },
     },
   },
   scales: {
     x: { ticks: { font: { size: 10, weight: "600" } }, grid: { display: false } },
-    y: { ticks: { font: { size: 9 } }, grid: { display: false }, grace: "15%" },
+    y: { ticks: { font: { size: 9 } }, grid: { display: false }, grace: "8%" },
   },
 });
 
 const getYearlyPopLineOpts = (yearlyData) => ({
   ...chartOpts,
   plugins: {
-    legend: { position: "top" },
+    legend: {
+      position: "top",
+      align: "end",
+      labels: { ...chartLegendLabels },
+    },
     tooltip: {
       callbacks: {
         label: (context) => {
@@ -325,7 +339,11 @@ const getYearlyPopLineOpts = (yearlyData) => ({
 const getForecastLineOpts = (lastActualValue, lastActualYear) => ({
   ...chartOpts,
   plugins: {
-    legend: { position: "top", labels: { boxWidth: 12, font: { size: 10 } } },
+    legend: {
+      position: "top",
+      align: "end",
+      labels: { ...chartLegendLabels },
+    },
     tooltip: {
       callbacks: {
         label: (context) => {
@@ -895,7 +913,8 @@ export default function Dashboard() {
         { label: "Current:", value: stats.totalPopulation.toLocaleString() },
         { label: "5-Year Projection:", value: `${projected5yr.toLocaleString()} (${Number(popGrowthPct) >= 0 ? "+" : ""}${popGrowthPct}%)` },
       ],
-      tag: `↗ ${Number(popGrowthPct) >= 0 ? "+" : ""}${popGrowthPct}% Linear Regression Projection`,
+      tag: `${Number(popGrowthPct) >= 0 ? "↗" : "↘"} ${Number(popGrowthPct) >= 0 ? "+" : ""}${popGrowthPct}% Linear Regression Projection`,
+      tone: Number(popGrowthPct) < 0 ? "negative" : "",
       footer:
         "Analyzes the current database census metrics and projects growth using a fitted linear regression slope.",
     },
@@ -908,7 +927,8 @@ export default function Dashboard() {
           value: `${projectedSeniors5yr.toLocaleString()} (${Number(seniorGrowthPct) >= 0 ? "+" : ""}${seniorGrowthPct}%)`,
         },
       ],
-      tag: `↗ ${Number(seniorGrowthPct) >= 0 ? "+" : ""}${seniorGrowthPct}% Aging Linear Regression`,
+      tag: `${Number(seniorGrowthPct) >= 0 ? "↗" : "↘"} ${Number(seniorGrowthPct) >= 0 ? "+" : ""}${seniorGrowthPct}% Aging Linear Regression`,
+      tone: Number(seniorGrowthPct) < 0 ? "negative" : "",
       footer:
         "Utilizes linear regression models on aging rates to project senior demographic counts in 5 years.",
     },
@@ -937,7 +957,7 @@ export default function Dashboard() {
   ];
 
   const renderOverview = () => (
-    <div className="tab-content animate-fade-up">
+    <div className="tab-content animate-fade-up overview-section">
       {/* Stat Cards */}
       <div className="stats-container">
         {STAT_CARDS.map((card, i) => (
@@ -1342,7 +1362,7 @@ export default function Dashboard() {
     };
 
     return (
-      <div className="tab-content animate-fade-up">
+      <div className="tab-content animate-fade-up demographics-section">
         {/* Row 1: Senior Citizens */}
         <div className="charts-grid">
           <div className="chart-item">
@@ -1445,7 +1465,7 @@ export default function Dashboard() {
   };
 
   const renderForecast = () => (
-    <div className="tab-content animate-fade-up">
+    <div className="tab-content animate-fade-up forecast-section">
       <div className="forecast-container">
         {FORECAST_CARDS.map((fc, i) => (
           <div key={i} className="f-card">
@@ -1459,7 +1479,7 @@ export default function Dashboard() {
                   <strong>{isLoading ? "…" : row.value}</strong>
                 </div>
               ))}
-              {fc.tag && <div className="f-growth">{fc.tag}</div>}
+              {fc.tag && <div className={`f-growth ${fc.tone || ""}`}>{fc.tag}</div>}
               {fc.status && <div className="f-status">{fc.status}</div>}
             </div>
             <div className="f-footer">{fc.footer}</div>
@@ -1473,25 +1493,6 @@ export default function Dashboard() {
           <div className="chart-container">
             {!isLoading && <Bar data={ageChartData} options={getAgeChartOpts(stats.totalPopulation)} />}
           </div>
-          {(() => {
-            const ageTotal = (stats.childrenCount + stats.workingAgeCount + stats.seniorCount) || stats.totalPopulation || 1;
-            const chPct = ((stats.childrenCount / ageTotal) * 100).toFixed(1);
-            const waPct = ((stats.workingAgeCount / ageTotal) * 100).toFixed(1);
-            const snPct = ((stats.seniorCount / ageTotal) * 100).toFixed(1);
-            return (
-              <div className="chart-sub-summary" style={{ marginTop: "10px" }}>
-                <span className="sub-badge">
-                  Children (0–17): <strong>{stats.childrenCount.toLocaleString()}</strong> <span className="sub-pct">{chPct}%</span>
-                </span>
-                <span className="sub-badge">
-                  Working-Age (18–59): <strong>{stats.workingAgeCount.toLocaleString()}</strong> <span className="sub-pct">{waPct}%</span>
-                </span>
-                <span className="sub-badge">
-                  Seniors (60+): <strong>{stats.seniorCount.toLocaleString()}</strong> <span className="sub-pct">{snPct}%</span>
-                </span>
-              </div>
-            );
-          })()}
           <p className="chart-note">
             Breakdown of current residents by age group: Children (0–17),
             Working-Age (18–59), Seniors (60+).
@@ -1514,7 +1515,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="charts-grid" style={{ marginTop: "24px" }}>
+      <div className="charts-grid">
         <div className="chart-item">
           <h4>Voters Prediction (Linear Regression)</h4>
           <div className="chart-container">
@@ -1553,13 +1554,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div
-        className="charts-grid"
-        style={{ marginTop: "24px", gridTemplateColumns: "1fr" }}
-      >
+      <div className="charts-grid" style={{ gridTemplateColumns: "1fr" }}>
         <div className="chart-item">
           <h4>Teenage Pregnancy Prediction (Linear Regression)</h4>
-          <div className="chart-container" style={{ height: "300px" }}>
+          <div className="chart-container">
             {!isLoading && (
               <Line
                 data={teenPregLineData}
