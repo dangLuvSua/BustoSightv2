@@ -37,3 +37,8 @@ db.json
 
 # Vite
 *.timestamp-*
+
+# Media
+*.mp4
+*.webm
+*.mov
