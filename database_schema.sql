@@ -24,6 +24,8 @@ CREATE TABLE public.profiles (
     created_at TIMESTAMP WITH TIME ZONE NULL DEFAULT timezone('utc'::text, NOW()),
     updated_at TIMESTAMP WITH TIME ZONE NULL,
     must_change_password BOOLEAN NULL DEFAULT FALSE,
+    is_locked BOOLEAN NULL DEFAULT FALSE,
+
     CONSTRAINT profiles_pkey PRIMARY KEY (id),
     CONSTRAINT profiles_email_key UNIQUE (email),
     CONSTRAINT profiles_employee_id_key UNIQUE (employee_id),
@@ -89,6 +91,28 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- --------------------------------------------------------
+-- Function: Securely lock an account by username or email.
+-- Callable by anon/unauthenticated login screen upon 3 failed attempts.
+-- Uses SECURITY DEFINER to bypass RLS safely.
+-- --------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.lock_account(account_identifier TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    UPDATE public.profiles
+    SET is_locked = true, updated_at = timezone('utc'::text, NOW())
+    WHERE LOWER(username) = LOWER(TRIM(account_identifier))
+       OR LOWER(email) = LOWER(TRIM(account_identifier));
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.lock_account(TEXT) TO anon, authenticated;
+
 
 
 -- ============================================================

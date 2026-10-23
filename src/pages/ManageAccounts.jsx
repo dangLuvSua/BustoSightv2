@@ -1289,11 +1289,24 @@ const verifyAdminPassword = async (pwdToVerify) => {
                               </span>
                             </td>
                             <td>
-                              <span
-                                className={`status-badge status-${statusDisplay.toLowerCase()}`}
-                              >
-                                {statusDisplay}
-                              </span>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                                <span
+                                  className={`status-badge status-${statusDisplay.toLowerCase()}`}
+                                >
+                                  {statusDisplay}
+                                </span>
+                                {acc.is_locked && (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                    fontSize: '11px', fontWeight: '600',
+                                    color: '#92400e', background: '#fef3c7',
+                                    border: '1px solid #fde68a', borderRadius: '10px',
+                                    padding: '2px 8px', lineHeight: '1.4',
+                                  }}>
+                                    🔒 Locked
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td
                               style={{
@@ -1343,6 +1356,43 @@ const verifyAdminPassword = async (pwdToVerify) => {
                                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                 </svg>
                               </button>
+
+                              {/* Reset Password Button — only for Staff/Encoder */}
+                              {(acc.role === 'Staff' || acc.role === 'Encoder') && !acc.archived && (
+                                <button
+                                  className="btn-action-icon"
+                                  title={acc.is_locked ? 'Unlock & Reset Password' : 'Reset Password'}
+                                  onClick={() => openForceResetPasswordModal(acc)}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    width: "32px",
+                                    height: "32px",
+                                    borderRadius: "50%",
+                                    background: acc.is_locked ? '#fef3c7' : '#fff7ed',
+                                    color: acc.is_locked ? '#d97706' : '#ea580c',
+                                    border: acc.is_locked ? '1px solid #fde68a' : '1px solid #fed7aa',
+                                    cursor: "pointer",
+                                    marginLeft: "6px",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = acc.is_locked ? '#d97706' : '#ea580c';
+                                    e.currentTarget.style.color = 'white';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = acc.is_locked ? '#fef3c7' : '#fff7ed';
+                                    e.currentTarget.style.color = acc.is_locked ? '#d97706' : '#ea580c';
+                                  }}
+                                >
+                                  {/* Key icon */}
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="7.5" cy="15.5" r="5.5"/>
+                                    <path d="M21 2l-9.6 9.6"/>
+                                    <path d="M15.5 7.5l3 3L22 7l-3-3"/>
+                                  </svg>
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -2221,7 +2271,10 @@ const verifyAdminPassword = async (pwdToVerify) => {
         <ResetStaffPasswordModal
           targetUser={modalState.data}
           onClose={closeModal}
-          onSuccess={(msg) => showToast(msg, "success")}
+          onSuccess={(msg) => {
+            showToast(msg, "success");
+            fetchAccounts(); // Refresh so lock badge disappears
+          }}
         />
       )}
     </div>

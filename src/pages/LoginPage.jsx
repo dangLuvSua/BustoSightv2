@@ -5,12 +5,25 @@ import { useToast } from '../context/FeedbackContext';
 import PasswordInput from '../components/PasswordInput';
 import '../css/LoginPage.css';
 
+const MAX_ATTEMPTS = 3;
+const ATTEMPTS_KEY = 'bustos_login_attempts';
+
+function getStoredAttempts() {
+  try { return JSON.parse(localStorage.getItem(ATTEMPTS_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function setStoredAttempts(obj) {
+  localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(obj));
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isAccountLocked, setIsAccountLocked] = useState(false);
   const location = useLocation();
   const toast = useToast();
 
@@ -28,66 +41,141 @@ export default function LoginPage() {
     setIsLoading(true);
     setErrorMsg('');
 
+    const usernameKey = username.trim().toLowerCase();
+    const allAttempts = getStoredAttempts();
+    const isLocallyLocked = (allAttempts[usernameKey] || 0) >= MAX_ATTEMPTS;
+
     try {
-      // Supabase Auth requires an email. If the user enters a username, 
-      // we first look up their actual email from the profiles table.
-      let loginEmail = username;
+      let loginEmail = username.trim();
+      let targetProfile = null;
 
-      if (!username.includes('@')) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('username', username)
-          .single();
+      // Always query profile by username OR email to check lock and deactivation status
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, email, username, is_locked, must_change_password, status, archived')
+        .or(`username.ilike.${loginEmail},email.ilike.${loginEmail}`)
+        .maybeSingle();
 
-        if (profileData && profileData.email) {
-          loginEmail = profileData.email;
+      targetProfile = profileData;
+
+      // 1. If already marked locked in DB, immediately block
+      if (targetProfile?.is_locked) {
+        setIsAccountLocked(true);
+        allAttempts[usernameKey] = MAX_ATTEMPTS;
+        setStoredAttempts(allAttempts);
+        return;
+      }
+
+      // 2. If locally locked (3 failed attempts), check if an admin reset it
+      if (isLocallyLocked) {
+        if (targetProfile && targetProfile.must_change_password && !targetProfile.is_locked) {
+          // Admin has reset this account! Unlock so the user can log in with temporary password
+          delete allAttempts[usernameKey];
+          setStoredAttempts(allAttempts);
+          setIsAccountLocked(false);
         } else {
-          // Fallback if no email is set in the profile but they try to log in
-          loginEmail = `${username}@bustos.gov.ph`;
+          // Still locked! Block login attempt immediately
+          setIsAccountLocked(true);
+          return;
         }
       }
 
+      // Check account status
+      if (targetProfile) {
+        if (targetProfile.archived || targetProfile.status !== 'Active') {
+          setErrorMsg('Your account is deactivated. Contact the admin to activate it.');
+          return;
+        }
+        loginEmail = targetProfile.email || (loginEmail.includes('@') ? loginEmail : `${loginEmail}@bustos.gov.ph`);
+      } else if (!loginEmail.includes('@')) {
+        loginEmail = `${loginEmail}@bustos.gov.ph`;
+      }
+
+      // 3. Perform Supabase authentication
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password,
       });
 
       if (authError || !authData.user) {
-        // Check local storage accounts fallback for testing
-        const localUsers = JSON.parse(localStorage.getItem('popdevUsers')) || [];
-        const localMatch = localUsers.find(
-          (u) =>
-            (u.username || '').toLowerCase() === username.toLowerCase() ||
-            (u.email || '').toLowerCase() === username.toLowerCase()
-        );
+        // Increment the failed attempt counter
+        const currentAttempts = (allAttempts[usernameKey] || 0) + 1;
+        const remaining = MAX_ATTEMPTS - currentAttempts;
 
-        if (localMatch && (localMatch.archived || localMatch.status !== 'Active')) {
-          setErrorMsg('Your account is deactivated. Contact the admin to activate it.');
-          return;
+        if (currentAttempts >= MAX_ATTEMPTS) {
+          // Max attempts reached — lock account
+          allAttempts[usernameKey] = currentAttempts;
+          setStoredAttempts(allAttempts);
+
+          // Invoke secure database function to lock the account (bypasses RLS)
+          try {
+            await supabase.rpc('lock_account', { account_identifier: username.trim() });
+          } catch (rpcErr) {
+            console.warn('RPC lock_account call failed:', rpcErr);
+          }
+
+          // Fallback direct update attempt
+          try {
+            await supabase
+              .from('profiles')
+              .update({ is_locked: true, updated_at: new Date().toISOString() })
+              .or(`username.ilike.${username.trim()},email.ilike.${username.trim()}`);
+          } catch (dbErr) {
+            console.warn('Direct lock update failed:', dbErr);
+          }
+
+          setIsAccountLocked(true);
+        } else {
+          allAttempts[usernameKey] = currentAttempts;
+          setStoredAttempts(allAttempts);
+          if (remaining === 1) {
+            setErrorMsg(`Incorrect username or password. This is your last attempt. Your account will be locked on the next failed login.`);
+          } else {
+            setErrorMsg(`Incorrect username or password. You have ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`);
+          }
         }
-
-        setErrorMsg(authError?.message || 'Invalid username or password.');
         return;
       }
 
-      // Fetch the user's profile to check their status and archiving
+      // 4. Successful auth — fetch profile
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', authData.user.id)
         .single();
 
-      if (profileError || !profile || profile.archived || profile.status !== 'Active') {
-        // If account is archived, inactive, or missing, log them out immediately
+      if (profileError || !profile) {
+        await supabase.auth.signOut();
+        setErrorMsg('Could not load your profile. Contact the admin.');
+        return;
+      }
+
+      // 5. Verify account is not locked
+      if (profile.is_locked) {
+        await supabase.auth.signOut();
+        allAttempts[usernameKey] = MAX_ATTEMPTS;
+        setStoredAttempts(allAttempts);
+        setIsAccountLocked(true);
+        return;
+      }
+
+      // If user had reached max attempts locally and didn't have must_change_password
+      if (isLocallyLocked && !profile.must_change_password) {
+        await supabase.auth.signOut();
+        setIsAccountLocked(true);
+        return;
+      }
+
+      if (profile.archived || profile.status !== 'Active') {
         await supabase.auth.signOut();
         setErrorMsg('Your account is deactivated. Contact the admin to activate it.');
         return;
       }
 
-      // Store user session info for the frontend.
-      // NOTE: never persist the password here. Admin re-authentication verifies
-      // against Supabase directly (see ManageAccounts.verifyAdminPassword).
+      // Successful login — clear attempt counter for this user
+      delete allAttempts[usernameKey];
+      setStoredAttempts(allAttempts);
+
       localStorage.setItem('popdev_user', JSON.stringify({ ...profile }));
       navigate('/dashboard');
     } catch (err) {
@@ -131,7 +219,22 @@ export default function LoginPage() {
             <h2>Login</h2>
             <p className="login-instruction">Please log in with your official credentials.</p>
 
-            {errorMsg && <div className="login-error-msg" style={{ color: '#ff4d4d', marginBottom: '15px', fontSize: '14px', fontWeight: 'bold' }}>{errorMsg}</div>}
+            {isAccountLocked && (
+              <div className="login-locked-msg">
+                <div className="login-locked-icon">🔒</div>
+                <div className="login-locked-text">
+                  <strong>Account Temporarily Locked</strong>
+                  <p>
+                    This account has been locked due to too many failed login attempts.
+                    Please contact the administrator to reset your account and password.
+                    Once the admin provides you a new password, log in with it to set your own.
+                  </p>
+                </div>
+              </div>
+            )}
+            {!isAccountLocked && errorMsg && (
+              <div className="login-error-msg">{errorMsg}</div>
+            )}
 
             <form id="loginForm" onSubmit={handleLogin}>
               <div className="login-input-group">
@@ -142,7 +245,17 @@ export default function LoginPage() {
                   name="username"
                   placeholder="Enter username"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setUsername(val);
+                    setErrorMsg('');
+                    const attempts = getStoredAttempts()[val.trim().toLowerCase()] || 0;
+                    if (attempts >= MAX_ATTEMPTS) {
+                      setIsAccountLocked(true);
+                    } else if (isAccountLocked) {
+                      setIsAccountLocked(false);
+                    }
+                  }}
                   required
                   autoComplete="username"
                 />

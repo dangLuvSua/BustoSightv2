@@ -116,14 +116,16 @@ serve(async (req) => {
       throw updateError
     }
 
-    // 5. Update profiles.must_change_password to true
+    // 5. Update profiles: set must_change_password=true and clear is_locked
+    //    is_locked is cleared here so the user can log in with the admin-given
+    //    password. must_change_password then forces them to set a new password.
     const { error: profileUpdateError } = await adminClient
       .from('profiles')
-      .update({ must_change_password: true, updated_at: new Date().toISOString() })
+      .update({ must_change_password: true, is_locked: false, updated_at: new Date().toISOString() })
       .eq('id', target_user_id)
 
     if (profileUpdateError) {
-       console.error("Failed to update must_change_password:", profileUpdateError)
+       console.error("Failed to update must_change_password/is_locked:", profileUpdateError)
     }
 
     // 6. Log the action
